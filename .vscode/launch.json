@@ -1,0 +1,30 @@
+{
+  // Débogage pas-à-pas dans le conteneur Odoo.
+  // 1. lancez  `make debug`  (Odoo attend le débogueur)
+  // 2. F5 -> « Odoo: attach (docker) »
+  // 3. posez vos points d'arrêt dans addons-custom/
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Odoo: attach (docker)",
+      "type": "debugpy",
+      "request": "attach",
+      "connect": { "host": "localhost", "port": 5678 },
+      "pathMappings": [
+        {
+          "localRoot": "${workspaceFolder}/addons-custom",
+          "remoteRoot": "/mnt/addons-custom"
+        },
+        {
+          "localRoot": "${workspaceFolder}/addons-oca",
+          "remoteRoot": "/mnt/addons-oca"
+        },
+        {
+          "localRoot": "${workspaceFolder}/enterprise",
+          "remoteRoot": "/mnt/enterprise"
+        }
+      ],
+      "justMyCode": false
+    }
+  ]
+}

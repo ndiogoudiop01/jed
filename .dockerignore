@@ -1,0 +1,21 @@
+# Ne pas embarquer l'historique git des submodules (plusieurs Go)
+**/.git
+**/.github
+
+# Secrets et données
+.env
+.env.*
+backups-local/
+*.sql
+*.dump
+*.tar.gz
+
+# Inutile dans l'image
+docs/
+*.md
+.vscode/
+__pycache__/
+**/*.py[cod]
+**/tests/__pycache__
+docker-compose*.yml
+Makefile

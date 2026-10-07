@@ -1,0 +1,16 @@
+# ---------------------------------------------------------------------------
+#  Dépendances Python SUPPLÉMENTAIRES de ce client.
+#  Les dépendances d'Odoo lui-même sont déjà dans l'image officielle.
+#  Épinglez toujours une version (==) pour des builds reproductibles.
+# ---------------------------------------------------------------------------
+
+# Débogage à distance (VSCode / PyCharm) — activé via ODOO_DEBUGPY=1
+debugpy==1.8.5
+
+# --- Utilitaires fréquents (décommentez selon les besoins du client) --------
+# openupgradelib==3.7.0        # migrations de version
+# phonenumbers==8.13.44        # normalisation des numéros (indicatif +221)
+# python-stdnum==1.20          # validation NINEA / identifiants
+# xlsxwriter==3.2.0            # exports Excel avancés
+# paramiko==3.4.1              # SFTP (échanges bancaires)
+# zeep==4.2.1                  # clients SOAP (ex. administrations)

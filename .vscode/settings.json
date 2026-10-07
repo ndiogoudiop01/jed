@@ -1,0 +1,14 @@
+{
+  "python.analysis.extraPaths": ["./addons-custom", "./addons-oca", "./enterprise"],
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true
+  },
+  "search.exclude": {
+    "enterprise/**": true,
+    "addons-oca/**": true
+  },
+  "[python]": { "editor.tabSize": 4, "editor.insertSpaces": true },
+  "[xml]": { "editor.tabSize": 4, "editor.insertSpaces": true },
+  "files.associations": { "*.xml": "xml", "odoo.conf.tpl": "ini" }
+}

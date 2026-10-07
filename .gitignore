@@ -1,0 +1,30 @@
+# Secrets — ne JAMAIS committer
+.env
+.env.*
+!.env.example
+
+# Données locales
+backups-local/
+filestore/
+*.sql
+*.dump
+*.tar.gz
+*.tar.gz.enc
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Éditeurs / OS
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+DEPLOY-ENV.txt

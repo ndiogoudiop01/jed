@@ -1,0 +1,205 @@
+###############################################################################
+#  Stack Odoo — 1 client = 1 dépôt = 1 stack isolée.
+#
+#  Services :
+#    db      -> PostgreSQL dédié à ce client (aucun partage entre clients)
+#    odoo    -> couche mince au-dessus de l'image de base ODOO_BASE_IMAGE
+#    proxy   -> nginx : seul service exposé, route 8069 / 8072 (websocket)
+#    backup  -> sidecar de sauvegarde quotidienne (pg_dump + filestore)
+#
+#  PORTABLE : le routage passe par des labels Traefik explicites, pilotés par
+#  DOMAIN et TRAEFIK_*. Le même fichier fonctionne sur Coolify, sur Dokploy et
+#  sur un Docker nu avec votre propre Traefik — il suffit de changer .env.
+#
+#      Coolify  : TRAEFIK_NETWORK=coolify        ENTRYPOINT_HTTPS=https
+#      Dokploy  : TRAEFIK_NETWORK=dokploy-network ENTRYPOINT_HTTPS=websecure
+#      Docker   : TRAEFIK_NETWORK=traefik         ENTRYPOINT_HTTPS=websecure
+###############################################################################
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-restart: &default-restart
+  restart: unless-stopped
+
+services:
+
+  # ---------------------------------------------------------------- PostgreSQL
+  db:
+    image: postgres:${POSTGRES_VERSION:-16}-alpine
+    <<: *default-restart
+    logging: *default-logging
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: ${DB_USER:-odoo}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD requis}
+      PGDATA: /var/lib/postgresql/data/pgdata
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
+      TZ: ${TZ:-Africa/Dakar}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    command:
+      - "postgres"
+      - "-c"
+      - "max_connections=${PG_MAX_CONNECTIONS:-100}"
+      - "-c"
+      - "shared_buffers=${PG_SHARED_BUFFERS:-256MB}"
+      - "-c"
+      - "work_mem=${PG_WORK_MEM:-16MB}"
+      - "-c"
+      - "maintenance_work_mem=${PG_MAINTENANCE_WORK_MEM:-128MB}"
+      - "-c"
+      - "effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-1GB}"
+      - "-c"
+      - "log_min_duration_statement=${PG_LOG_SLOW_MS:-2000}"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-odoo} -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    labels:
+      - "traefik.enable=false"
+    networks: [internal]
+
+  # ---------------------------------------------------------------------- Odoo
+  odoo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        ODOO_BASE_IMAGE: ${ODOO_BASE_IMAGE:?ODOO_BASE_IMAGE requis (voir docs/BASE-IMAGES.md)}
+    image: ${CLIENT_SLUG:-odoo}-odoo:${ODOO_VERSION:-19.0}
+    # Cette image est construite ICI, elle n'existe dans aucun registre :
+    # sans ça, « docker compose up » tente un pull et échoue avec
+    # « pull access denied for <slug>-odoo ».
+    pull_policy: build
+    <<: *default-restart
+    logging: *default-logging
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # --- Base de données -------------------------------------------------
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-odoo}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD requis}
+      DB_NAME: ${DB_NAME:-false}
+      DB_FILTER: ${DB_FILTER:-.*}
+      DB_MAXCONN: ${DB_MAXCONN:-64}
+      LIST_DB: ${LIST_DB:-False}
+      # --- Sécurité --------------------------------------------------------
+      ODOO_MASTER_PASSWORD: ${ODOO_MASTER_PASSWORD:?ODOO_MASTER_PASSWORD requis}
+      # --- Performance -----------------------------------------------------
+      ODOO_WORKERS: ${ODOO_WORKERS:-2}
+      ODOO_MAX_CRON_THREADS: ${ODOO_MAX_CRON_THREADS:-1}
+      LIMIT_MEMORY_SOFT: ${LIMIT_MEMORY_SOFT:-2147483648}
+      LIMIT_MEMORY_HARD: ${LIMIT_MEMORY_HARD:-2684354560}
+      LIMIT_TIME_CPU: ${LIMIT_TIME_CPU:-600}
+      LIMIT_TIME_REAL: ${LIMIT_TIME_REAL:-1200}
+      LIMIT_TIME_REAL_CRON: ${LIMIT_TIME_REAL_CRON:-0}
+      LIMIT_REQUEST: ${LIMIT_REQUEST:-8192}
+      # --- Divers ----------------------------------------------------------
+      SERVER_WIDE_MODULES: ${SERVER_WIDE_MODULES:-base,web}
+      WITHOUT_DEMO: ${WITHOUT_DEMO:-all}
+      ODOO_LOG_LEVEL: ${ODOO_LOG_LEVEL:-info}
+      ODOO_LOG_HANDLER: ${ODOO_LOG_HANDLER:-:INFO}
+      ODOO_EXTRA_ARGS: ${ODOO_EXTRA_ARGS:-}
+      ODOO_DEBUGPY: ${ODOO_DEBUGPY:-0}
+      ODOO_DEBUGPY_WAIT: ${ODOO_DEBUGPY_WAIT:-0}
+      TZ: ${TZ:-Africa/Dakar}
+    volumes:
+      - odoo-data:/var/lib/odoo
+    labels:
+      - "traefik.enable=false"
+    networks: [internal]
+
+  # --------------------------------------------------------------- Proxy nginx
+  #  Seul service exposé. Aiguille /websocket vers le port 8072 d'Odoo.
+  #  La conf nginx est construite DANS l'image (voir nginx/Dockerfile) : un
+  #  bind-mount « ./nginx/... » casse sur Coolify/Dokploy, qui lancent compose
+  #  depuis un répertoire différent de celui du dépôt cloné.
+  proxy:
+    build:
+      context: ./nginx
+    image: ${CLIENT_SLUG:-odoo}-proxy:${ODOO_VERSION:-19.0}
+    pull_policy: build
+    <<: *default-restart
+    logging: *default-logging
+    depends_on:
+      - odoo
+    environment:
+      TZ: ${TZ:-Africa/Dakar}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/_health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=${TRAEFIK_NETWORK:-traefik}"
+      # --- routeur HTTPS ---------------------------------------------------
+      - "traefik.http.routers.${CLIENT_SLUG:-odoo}.rule=Host(`${DOMAIN:?DOMAIN requis}`)"
+      - "traefik.http.routers.${CLIENT_SLUG:-odoo}.entrypoints=${TRAEFIK_ENTRYPOINT_HTTPS:-websecure}"
+      - "traefik.http.routers.${CLIENT_SLUG:-odoo}.tls=true"
+      - "traefik.http.routers.${CLIENT_SLUG:-odoo}.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}"
+      - "traefik.http.routers.${CLIENT_SLUG:-odoo}.service=${CLIENT_SLUG:-odoo}"
+      - "traefik.http.services.${CLIENT_SLUG:-odoo}.loadbalancer.server.port=80"
+      # --- redirection HTTP -> HTTPS ---------------------------------------
+      - "traefik.http.routers.${CLIENT_SLUG:-odoo}-http.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.${CLIENT_SLUG:-odoo}-http.entrypoints=${TRAEFIK_ENTRYPOINT_HTTP:-web}"
+      - "traefik.http.routers.${CLIENT_SLUG:-odoo}-http.middlewares=${CLIENT_SLUG:-odoo}-https"
+      - "traefik.http.middlewares.${CLIENT_SLUG:-odoo}-https.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.${CLIENT_SLUG:-odoo}-https.redirectscheme.permanent=true"
+    networks: [internal, traefik]
+
+  # ------------------------------------------------------------ Sauvegardes
+  #  Idem : les scripts sont dans l'image (scripts/Dockerfile), pas montés.
+  backup:
+    build:
+      context: ./scripts
+      args:
+        POSTGRES_VERSION: ${POSTGRES_VERSION:-16}
+    image: ${CLIENT_SLUG:-odoo}-backup:${ODOO_VERSION:-19.0}
+    pull_policy: build
+    <<: *default-restart
+    logging: *default-logging
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      BACKUP_ENABLED: ${BACKUP_ENABLED:-true}
+      BACKUP_HOUR: ${BACKUP_HOUR:-2}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      BACKUP_ENC_PASSPHRASE: ${BACKUP_ENC_PASSPHRASE:-}
+      CLIENT_SLUG: ${CLIENT_SLUG:-odoo}
+      PGHOST: db
+      PGPORT: 5432
+      PGUSER: ${DB_USER:-odoo}
+      PGPASSWORD: ${DB_PASSWORD:?DB_PASSWORD requis}
+      TZ: ${TZ:-Africa/Dakar}
+    volumes:
+      - backups:/backups
+      - odoo-data:/filestore        # lecture pour le backup, écriture pour le restore
+    labels:
+      - "traefik.enable=false"
+    networks: [internal]
+
+volumes:
+  db-data:
+  odoo-data:
+  backups:
+
+networks:
+  # Réseau privé du client : db, odoo, backup n'en sortent jamais.
+  internal:
+    driver: bridge
+  # Réseau du reverse-proxy, créé par Coolify / Dokploy / votre Traefik.
+  traefik:
+    external: true
+    name: ${TRAEFIK_NETWORK:-traefik}

@@ -1,0 +1,48 @@
+###############################################################################
+#  Surcouche DÉVELOPPEMENT LOCAL — n'est JAMAIS utilisée en production.
+#
+#  Activée uniquement par le Makefile :
+#      make dev          (= docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d)
+#
+#  Apporte :
+#    - hot-reload : addons-custom/ et enterprise/ montés en bind (pas de rebuild)
+#    - workers=0 + --dev=all (reload Python/XML/QWeb automatique)
+#    - debugpy exposé pour VSCode / PyCharm
+#    - ports publiés sur l'hôte (issus du registre central des ports)
+#    - accès direct à PostgreSQL (DBeaver, pgAdmin…)
+###############################################################################
+
+services:
+
+  db:
+    ports:
+      - "${PG_PORT:-5432}:5432"
+
+  odoo:
+    environment:
+      ODOO_WORKERS: 0
+      ODOO_MAX_CRON_THREADS: 1
+      ODOO_LOG_LEVEL: debug
+      ODOO_LOG_HANDLER: ":INFO,werkzeug:WARNING,odoo.addons.base.models.ir_cron:WARNING"
+      LIST_DB: "True"
+      WITHOUT_DEMO: ${WITHOUT_DEMO:-all}
+      ODOO_DEBUGPY: ${ODOO_DEBUGPY:-0}
+      ODOO_DEBUGPY_WAIT: ${ODOO_DEBUGPY_WAIT:-0}
+      ODOO_EXTRA_ARGS: "--dev=all"
+    volumes:
+      # Hot-reload : le code du client est monté en direct, pas besoin de rebuild.
+      # Le core Odoo et Enterprise vivent dans l'image de base, en lecture seule.
+      - ./addons-custom:/mnt/addons-custom
+      - ./addons-oca:/mnt/addons-oca
+    ports:
+      - "${HTTP_PORT:-8069}:8069"
+      - "${LONGPOLLING_PORT:-8072}:8072"
+      - "${DEBUGPY_PORT:-5678}:5678"
+
+  proxy:
+    ports:
+      - "${PROXY_PORT:-8080}:80"
+
+  backup:
+    environment:
+      BACKUP_ENABLED: "false"     # pas de sauvegarde automatique en local
