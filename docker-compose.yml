@@ -29,7 +29,7 @@ services:
 
   # ---------------------------------------------------------------- PostgreSQL
   db:
-    image: postgres:${POSTGRES_VERSION:-16}-alpine
+    image: ${POSTGRES_IMAGE:-pgvector/pgvector:pg${POSTGRES_VERSION:-16}}
     <<: *default-restart
     logging: *default-logging
     environment:
